@@ -47,3 +47,7 @@ By adjusting the following parameters:
 - maxReceiveCount
 
 one can achieve optimal throughput without the need to write any code other than actual processing of the messages.
+
+## Credits
+
+[Jeremy Daly](https://www.jeremydaly.com/how-to-use-sns-and-sqs-to-distribute-and-throttle-events/)
