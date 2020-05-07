@@ -1,0 +1,137 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: skif-pdf-play
+# app and org for use with dashboard.serverless.com
+#app: your-app-name
+#org: your-org-name
+# plugins:
+#   - serverless-pseudo-parameters
+#   - serverless-offline
+#   - serverless-offline-sns
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+
+provider:
+  name: aws
+  runtime: nodejs10.x
+  stage: dev
+  profile: lis-dev
+
+# you can overwrite defaults here
+#  stage: dev
+#  region: us-east-1
+
+# you can add statements to the Lambda function's IAM Role here
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "sns:*"
+      Resource:
+        - { "Fn::Join" : ["", [ { "Ref" : "mySnsTopic" }, "/*" ] ] }
+        - { "Fn::Join" : ["", [ { "Ref" : "mySnsTopic" }, "*" ] ] }
+
+# you can define service wide environment variables here
+#  environment:
+#    variable1: value1
+
+# you can add packaging information here
+#package:
+#  include:
+#    - include-me.js
+#    - include-me-dir/**
+#  exclude:
+#    - exclude-me.js
+#    - exclude-me-dir/**
+
+functions:
+  producer:
+    handler: src/producer.handler
+    timeout: 30
+    # provisionedConcurrency: 1
+    events:
+      - http:
+          path: /initiate
+          method: post
+          cors: true
+          private: false
+#    Define function environment variables here
+    environment:
+      SNS_TOPIC_ARN: 
+        Ref: mySnsTopic
+
+  consumer:
+    handler: src/consumer.handler
+    description: Processes message from the SQS 
+    reservedConcurrency: 5
+    timeout: 60
+    events:
+      - sqs:
+          arn: !GetAtt
+            - firstQueue
+            - Arn
+          batchSize: 5
+
+# you can add CloudFormation resource templates here
+resources:
+  Resources:
+    mySnsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:service}-${self:provider.stage}-my-sns-topic
+
+    firstQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-first-queue
+        VisibilityTimeout: 180
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt
+            - firstQueueDLQ
+            - Arn
+          maxReceiveCount: 500     
+    firstQueueDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${self:provider.stage}-first-queue-dlq   
+
+    snsToFirstQueueSqsPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: "allow-sns-messages"
+              Effect: Allow
+              Principal: "*"
+              Resource: !GetAtt
+                - firstQueue
+                - Arn
+              Action: "SQS:SendMessage"
+              Condition:
+                ArnEquals:
+                  "aws:SourceArn": !Ref mySnsTopic
+        Queues:
+          - Ref: firstQueue
+
+    firstQueueSubscription:
+      Type: 'AWS::SNS::Subscription'
+      Properties:
+        TopicArn: !Ref mySnsTopic
+        Endpoint: !GetAtt
+          - firstQueue
+          - Arn
+        Protocol: sqs
+        RawMessageDelivery: 'true'
